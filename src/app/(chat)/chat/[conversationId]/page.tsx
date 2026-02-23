@@ -23,8 +23,7 @@ export default function ConversationPage() {
   const { user } = useUser();
   const [content, setContent] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-  const typingTimeout = useRef<NodeJS.Timeout>();
-
+  const typingTimeout = useRef<NodeJS.Timeout | null>(null);  
   const currentUser = useQuery(
     api.users.getUserByClerkId,
     user ? { clerkId: user.id } : "skip"
