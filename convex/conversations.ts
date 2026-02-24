@@ -7,12 +7,10 @@ export const getOrCreateConversation = mutation({
     otherUserId: v.id("users"),
   },
   handler: async (ctx, args) => {
-    // Find ALL conversations
     const allConversations = await ctx.db
       .query("conversations")
       .collect();
 
-    // Find existing 1:1 conversation between these two users
     const existing = allConversations.find(
       (c) =>
         c.isGroup === false &&
@@ -23,7 +21,6 @@ export const getOrCreateConversation = mutation({
 
     if (existing) return existing._id;
 
-    // Create new conversation
     return await ctx.db.insert("conversations", {
       participantIds: [args.currentUserId, args.otherUserId],
       isGroup: false,
@@ -43,6 +40,8 @@ export const getUserConversations = query({
       c.participantIds.includes(args.userId)
     );
 
+    const ONE_MINUTE = 60 * 1000;
+
     const enriched = await Promise.all(
       userConvos.map(async (convo) => {
         const otherParticipantIds = convo.participantIds.filter(
@@ -51,10 +50,21 @@ export const getUserConversations = query({
         const otherUsers = await Promise.all(
           otherParticipantIds.map((id) => ctx.db.get(id))
         );
+        
         const lastMessage = convo.lastMessageId
           ? await ctx.db.get(convo.lastMessageId)
           : null;
-        return { ...convo, otherUsers, lastMessage };
+
+        // FIX: Calculate if the other user is online based on lastSeen
+        const otherUsersWithStatus = otherUsers.map(u => {
+          if (!u) return null;
+          return {
+            ...u,
+            isOnline: Date.now() - u.lastSeen < ONE_MINUTE
+          };
+        }).filter(u => u !== null);
+
+        return { ...convo, otherUsers: otherUsersWithStatus, lastMessage };
       })
     );
 
