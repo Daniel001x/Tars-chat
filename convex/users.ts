@@ -32,6 +32,24 @@ export const upsertUser = mutation({
   },
 });
 
+// NEW: Simple heartbeat to keep user online
+export const heartbeat = mutation({
+  args: { clerkId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
+      .first();
+    
+    if (user) {
+      await ctx.db.patch(user._id, {
+        isOnline: true,
+        lastSeen: Date.now(),
+      });
+    }
+  },
+});
+
 export const setOnlineStatus = mutation({
   args: { clerkId: v.string(), isOnline: v.boolean() },
   handler: async (ctx, args) => {
@@ -69,17 +87,5 @@ export const getUserByClerkId = query({
       .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .first();
-  },
-});
-
-export const getAllUsersIncludingSelf = query({
-  args: {},
-  handler: async (ctx) => {
-    const users = await ctx.db.query("users").collect();
-    const ONE_MINUTE = 60 * 1000;
-    return users.map((u) => ({
-      ...u,
-      isOnline: Date.now() - u.lastSeen < ONE_MINUTE,
-    }));
   },
 });
