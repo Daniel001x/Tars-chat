@@ -18,6 +18,8 @@ export const upsertUser = mutation({
       await ctx.db.patch(existing._id, {
         name: args.name,
         imageUrl: args.imageUrl,
+        isOnline: true,
+        lastSeen: Date.now(),
       });
       return existing._id;
     }
@@ -50,7 +52,13 @@ export const getAllUsers = query({
   args: { currentClerkId: v.string() },
   handler: async (ctx, args) => {
     const users = await ctx.db.query("users").collect();
-    return users.filter((u) => u.clerkId !== args.currentClerkId);
+    const ONE_MINUTE = 60 * 1000;
+    return users
+      .filter((u) => u.clerkId !== args.currentClerkId)
+      .map((u) => ({
+        ...u,
+        isOnline: Date.now() - u.lastSeen < ONE_MINUTE,
+      }));
   },
 });
 
@@ -61,5 +69,17 @@ export const getUserByClerkId = query({
       .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .first();
+  },
+});
+
+export const getAllUsersIncludingSelf = query({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    const ONE_MINUTE = 60 * 1000;
+    return users.map((u) => ({
+      ...u,
+      isOnline: Date.now() - u.lastSeen < ONE_MINUTE,
+    }));
   },
 });
