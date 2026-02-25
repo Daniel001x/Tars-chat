@@ -1,17 +1,25 @@
 "use client";
+
 import { useUser, UserButton } from "@clerk/nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
-export default function ChatLayout({ children }: { children: React.ReactNode }) {
+export default function ChatLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { user } = useUser();
   const router = useRouter();
+  const pathname = usePathname();
   const [search, setSearch] = useState("");
+
+  const isInConversation = pathname !== "/chat";
 
   const currentUser = useQuery(
     api.users.getUserByClerkId,
@@ -33,7 +41,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   const heartbeat = useMutation(api.users.heartbeat);
   const setOnlineStatus = useMutation(api.users.setOnlineStatus);
 
-  // FIX 1: Create user profile on load
+  // Create / update user
   useEffect(() => {
     if (!user) return;
     upsertUser({
@@ -44,26 +52,18 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     });
   }, [user, upsertUser]);
 
-  // FIX 2: Heartbeat to keep status "Online"
+  // Heartbeat system
   useEffect(() => {
     if (!user) return;
 
-    // Function to send heartbeat
-    const sendHeartbeat = () => {
-      heartbeat({ clerkId: user.id });
-    };
+    const sendHeartbeat = () => heartbeat({ clerkId: user.id });
 
-    // Send immediately
     sendHeartbeat();
-
-    // Send every 30 seconds
     const interval = setInterval(sendHeartbeat, 30000);
 
-    // Handle tab close -> Set Offline
-    const handleUnload = () => {
+    const handleUnload = () =>
       setOnlineStatus({ clerkId: user.id, isOnline: false });
-    };
-    
+
     window.addEventListener("beforeunload", handleUnload);
 
     return () => {
@@ -78,18 +78,29 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
 
   const handleUserClick = async (otherUserId: Id<"users">) => {
     if (!currentUser) return;
+
     const convId = await getOrCreate({
       currentUserId: currentUser._id,
       otherUserId,
     });
+
     setSearch("");
     router.push(`/chat/${convId}`);
   };
 
   return (
-    <div className="flex h-screen w-full bg-gray-100">
+    <div className="h-screen w-full bg-gray-100 flex overflow-hidden">
       {/* SIDEBAR */}
-      <div className="w-80 bg-white flex flex-col shadow-lg flex-shrink-0">
+      <div
+        className={`
+          fixed md:relative inset-0 z-20
+          bg-white flex flex-col
+          w-full md:w-80
+          transition-transform duration-300
+          ${isInConversation ? "-translate-x-full md:translate-x-0" : "translate-x-0"}
+        `}
+      >
+        {/* Header */}
         <div className="bg-blue-600 p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-white text-xl">💬</span>
@@ -98,6 +109,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
           <UserButton afterSignOutUrl="/sign-in" />
         </div>
 
+        {/* Current User */}
         {user && (
           <div className="px-4 py-3 bg-blue-50 border-b flex items-center gap-3">
             <Image
@@ -105,30 +117,31 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
               alt={user.fullName ?? "You"}
               width={36}
               height={36}
-              className="rounded-full border-2 border-blue-300"
+              className="rounded-full"
             />
             <div>
-              <p className="text-sm font-semibold text-gray-800">{user.fullName}</p>
-              <p className="text-xs text-green-500 font-medium">● Online</p>
+              <p className="text-sm font-semibold">{user.fullName}</p>
+              <p className="text-xs text-green-500">● Online</p>
             </div>
           </div>
         )}
 
+        {/* Search */}
         <div className="p-3 border-b bg-gray-50">
           <input
             type="text"
             placeholder="🔍 Search users..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-white border border-gray-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="w-full bg-white border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
 
+        {/* Search Results */}
         {search && (
           <div className="border-b max-h-64 overflow-y-auto bg-white">
             {filteredUsers?.length === 0 ? (
               <div className="p-6 text-center text-gray-400">
-                <p className="text-2xl mb-1">🔍</p>
                 <p className="text-sm">No users found</p>
               </div>
             ) : (
@@ -136,21 +149,20 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                 <button
                   key={u._id}
                   onClick={() => handleUserClick(u._id)}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 text-left transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 text-left"
                 >
-                  <div className="relative shrink-0">
-                    <Image
-                      src={u.imageUrl ?? `https://api.dicebear.com/7.x/initials/svg?seed=${u.name}`}
-                      alt={u.name}
-                      width={40}
-                      height={40}
-                      className="rounded-full border-2 border-gray-100"
-                    />
-                    <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${u.isOnline ? "bg-green-500" : "bg-gray-300"}`} />
-                  </div>
+                  <Image
+                    src={u.imageUrl}
+                    alt={u.name}
+                    width={40}
+                    height={40}
+                    className="rounded-full"
+                  />
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">{u.name}</p>
-                    <p className="text-xs text-gray-400">{u.isOnline ? "Online" : "Offline"}</p>
+                    <p className="text-sm font-semibold">{u.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {u.isOnline ? "Online" : "Offline"}
+                    </p>
                   </div>
                 </button>
               ))
@@ -158,66 +170,48 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
           </div>
         )}
 
+        {/* Conversations */}
         <div className="flex-1 overflow-y-auto">
-          {!search && (
-            <>
-              {conversations === undefined ? (
-                <div className="p-4 space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center gap-3 animate-pulse">
-                      <div className="w-12 h-12 bg-gray-200 rounded-full shrink-0" />
-                      <div className="flex-1 space-y-2">
-                        <div className="h-3 bg-gray-200 rounded-full w-3/4" />
-                        <div className="h-3 bg-gray-200 rounded-full w-1/2" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : conversations.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-gray-400 p-6 text-center">
-                  <p className="text-4xl mb-2">💬</p>
-                  <p className="font-semibold text-gray-500">No conversations yet</p>
-                  <p className="text-sm mt-1">Search for a user to start chatting</p>
-                </div>
-              ) : (
-                conversations.map((convo) => {
-                  const other = convo.otherUsers?.[0];
-                  // Use the calculated isOnline from backend
-                  const isOnline = other?.isOnline ?? false;
-                  
-                  return (
-                    <Link
-                      key={convo._id}
-                      href={`/chat/${convo._id}`}
-                      className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b transition-colors"
-                    >
-                      <div className="relative shrink-0">
-                        <Image
-                          src={other?.imageUrl ?? `https://api.dicebear.com/7.x/initials/svg?seed=${other?.name}`}
-                          alt={other?.name ?? "User"}
-                          width={48}
-                          height={48}
-                          className="rounded-full border-2 border-gray-100"
-                        />
-                        <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${isOnline ? "bg-green-500" : "bg-gray-300"}`} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{other?.name}</p>
-                        <p className="text-xs text-gray-400 truncate">
-                          {convo.lastMessage?.isDeleted ? "🚫 Message deleted" : convo.lastMessage?.content ?? "Start a conversation"}
-                        </p>
-                      </div>
-                    </Link>
-                  );
-                })
-              )}
-            </>
-          )}
+          {!search &&
+            conversations?.map((convo) => {
+              const other = convo.otherUsers?.[0];
+
+              return (
+                <Link
+                  key={convo._id}
+                  href={`/chat/${convo._id}`}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b"
+                >
+                  <Image
+                    src={other?.imageUrl ?? ""}
+                    alt={other?.name ?? "User"}
+                    width={45}
+                    height={45}
+                    className="rounded-full"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">
+                      {other?.name}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {convo.lastMessage?.content ??
+                        "Start a conversation"}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* MAIN CHAT AREA */}
+      <div
+        className={`
+          flex-1 flex flex-col bg-white
+          transition-transform duration-300
+          ${isInConversation ? "translate-x-0" : "translate-x-full md:translate-x-0"}
+        `}
+      >
         {children}
       </div>
     </div>
