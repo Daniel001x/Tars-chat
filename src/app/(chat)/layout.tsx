@@ -101,9 +101,11 @@ export default function ChatLayout({
           bg-white flex flex-col
           w-full md:w-80
           transition-transform duration-300
-          ${isInConversation
-            ? "-translate-x-full md:translate-x-0"
-            : "translate-x-0"}
+          ${
+            isInConversation
+              ? "-translate-x-full md:translate-x-0"
+              : "translate-x-0"
+          }
         `}
       >
         {/* Header */}
@@ -217,9 +219,11 @@ export default function ChatLayout({
         className={`
           flex-1 flex flex-col bg-white
           transition-transform duration-300
-          ${isInConversation
-            ? "translate-x-0"
-            : "translate-x-full md:translate-x-0"}
+          ${
+            isInConversation
+              ? "translate-x-0"
+              : "translate-x-full md:translate-x-0"
+          }
         `}
       >
         {children}
