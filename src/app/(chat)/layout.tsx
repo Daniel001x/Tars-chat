@@ -3,7 +3,7 @@ import { useUser, UserButton } from "@clerk/nextjs";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -29,6 +29,48 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
   );
 
   const getOrCreate = useMutation(api.conversations.getOrCreateConversation);
+  const upsertUser = useMutation(api.users.upsertUser);
+  const heartbeat = useMutation(api.users.heartbeat);
+  const setOnlineStatus = useMutation(api.users.setOnlineStatus);
+
+  // FIX 1: Create user profile on load
+  useEffect(() => {
+    if (!user) return;
+    upsertUser({
+      clerkId: user.id,
+      name: user.fullName ?? user.username ?? "Anonymous",
+      email: user.emailAddresses[0]?.emailAddress ?? "",
+      imageUrl: user.imageUrl,
+    });
+  }, [user, upsertUser]);
+
+  // FIX 2: Heartbeat to keep status "Online"
+  useEffect(() => {
+    if (!user) return;
+
+    // Function to send heartbeat
+    const sendHeartbeat = () => {
+      heartbeat({ clerkId: user.id });
+    };
+
+    // Send immediately
+    sendHeartbeat();
+
+    // Send every 30 seconds
+    const interval = setInterval(sendHeartbeat, 30000);
+
+    // Handle tab close -> Set Offline
+    const handleUnload = () => {
+      setOnlineStatus({ clerkId: user.id, isOnline: false });
+    };
+    
+    window.addEventListener("beforeunload", handleUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [user, heartbeat, setOnlineStatus]);
 
   const filteredUsers = allUsers?.filter((u) =>
     u.name.toLowerCase().includes(search.toLowerCase())
@@ -140,6 +182,9 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
               ) : (
                 conversations.map((convo) => {
                   const other = convo.otherUsers?.[0];
+                  // Use the calculated isOnline from backend
+                  const isOnline = other?.isOnline ?? false;
+                  
                   return (
                     <Link
                       key={convo._id}
@@ -154,7 +199,7 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
                           height={48}
                           className="rounded-full border-2 border-gray-100"
                         />
-                        <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${other?.isOnline ? "bg-green-500" : "bg-gray-300"}`} />
+                        <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${isOnline ? "bg-green-500" : "bg-gray-300"}`} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-gray-800 truncate">{other?.name}</p>

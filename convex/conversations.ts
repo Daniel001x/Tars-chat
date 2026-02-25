@@ -47,22 +47,66 @@ export const getUserConversations = query({
         const otherParticipantIds = convo.participantIds.filter(
           (id) => id !== args.userId
         );
-        const otherUsers = await Promise.all(
-          otherParticipantIds.map((id) => ctx.db.get(id))
-        );
-        
-        const lastMessage = convo.lastMessageId
-          ? await ctx.db.get(convo.lastMessageId)
-          : null;
 
-        // FIX: Calculate if the other user is online based on lastSeen
-        const otherUsersWithStatus = otherUsers.map(u => {
-          if (!u) return null;
-          return {
-            ...u,
-            isOnline: Date.now() - u.lastSeen < ONE_MINUTE
-          };
-        }).filter(u => u !== null);
+        const [otherUsers, lastMessage] = await Promise.all([
+          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+        ]);
+
+        const otherUsersWithStatus = otherUsers
+          .filter((u) => u !== null)
+          .map((u) => ({
+            ...u!,
+            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONE_MINUTE,
+          }));
+
+        return { ...convo, otherUsers: otherUsersWithStatus, lastMessage };
+      })
+    );
+
+    return enriched.sort(
+      (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0)
+    );
+  },
+});
+
+export const getConversationsByClerkId = query({
+  args: { clerkId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
+      .first();
+
+    if (!user) return [];
+
+    const ONE_MINUTE = 60 * 1000;
+
+    const allConversations = await ctx.db
+      .query("conversations")
+      .collect();
+
+    const userConvos = allConversations.filter((c) =>
+      c.participantIds.includes(user._id)
+    );
+
+    const enriched = await Promise.all(
+      userConvos.map(async (convo) => {
+        const otherParticipantIds = convo.participantIds.filter(
+          (id) => id !== user._id
+        );
+
+        const [otherUsers, lastMessage] = await Promise.all([
+          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+        ]);
+
+        const otherUsersWithStatus = otherUsers
+          .filter((u) => u !== null)
+          .map((u) => ({
+            ...u!,
+            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONE_MINUTE,
+          }));
 
         return { ...convo, otherUsers: otherUsersWithStatus, lastMessage };
       })
