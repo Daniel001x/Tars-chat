@@ -9,6 +9,9 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
+const fallbackAvatar =
+  "https://ui-avatars.com/api/?name=User&background=random";
+
 export default function ChatLayout({
   children,
 }: {
@@ -41,14 +44,15 @@ export default function ChatLayout({
   const heartbeat = useMutation(api.users.heartbeat);
   const setOnlineStatus = useMutation(api.users.setOnlineStatus);
 
-  // Create / update user
+  // Create or update user in Convex
   useEffect(() => {
     if (!user) return;
+
     upsertUser({
       clerkId: user.id,
       name: user.fullName ?? user.username ?? "Anonymous",
       email: user.emailAddresses[0]?.emailAddress ?? "",
-      imageUrl: user.imageUrl,
+      imageUrl: user.imageUrl ?? fallbackAvatar,
     });
   }, [user, upsertUser]);
 
@@ -97,7 +101,9 @@ export default function ChatLayout({
           bg-white flex flex-col
           w-full md:w-80
           transition-transform duration-300
-          ${isInConversation ? "-translate-x-full md:translate-x-0" : "translate-x-0"}
+          ${isInConversation
+            ? "-translate-x-full md:translate-x-0"
+            : "translate-x-0"}
         `}
       >
         {/* Header */}
@@ -113,14 +119,16 @@ export default function ChatLayout({
         {user && (
           <div className="px-4 py-3 bg-blue-50 border-b flex items-center gap-3">
             <Image
-              src={user.imageUrl}
+              src={user.imageUrl ?? fallbackAvatar}
               alt={user.fullName ?? "You"}
               width={36}
               height={36}
               className="rounded-full"
             />
             <div>
-              <p className="text-sm font-semibold">{user.fullName}</p>
+              <p className="text-sm font-semibold">
+                {user.fullName ?? "You"}
+              </p>
               <p className="text-xs text-green-500">● Online</p>
             </div>
           </div>
@@ -152,7 +160,7 @@ export default function ChatLayout({
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 text-left"
                 >
                   <Image
-                    src={u.imageUrl}
+                    src={u.imageUrl ?? fallbackAvatar}
                     alt={u.name}
                     width={40}
                     height={40}
@@ -183,7 +191,7 @@ export default function ChatLayout({
                   className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b"
                 >
                   <Image
-                    src={other?.imageUrl ?? ""}
+                    src={other?.imageUrl ?? fallbackAvatar}
                     alt={other?.name ?? "User"}
                     width={45}
                     height={45}
@@ -191,7 +199,7 @@ export default function ChatLayout({
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">
-                      {other?.name}
+                      {other?.name ?? "User"}
                     </p>
                     <p className="text-xs text-gray-400 truncate">
                       {convo.lastMessage?.content ??
@@ -209,7 +217,9 @@ export default function ChatLayout({
         className={`
           flex-1 flex flex-col bg-white
           transition-transform duration-300
-          ${isInConversation ? "translate-x-0" : "translate-x-full md:translate-x-0"}
+          ${isInConversation
+            ? "translate-x-0"
+            : "translate-x-full md:translate-x-0"}
         `}
       >
         {children}
