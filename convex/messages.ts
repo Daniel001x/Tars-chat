@@ -1,28 +1,7 @@
-import { mutation, query } from "./_generated/server";
+import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
-export const sendMessage = mutation({
-  args: {
-    conversationId: v.id("conversations"),
-    senderId: v.id("users"),
-    content: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const messageId = await ctx.db.insert("messages", {
-      ...args,
-      isDeleted: false,
-    });
-
-    // Update conversation last message
-    await ctx.db.patch(args.conversationId, {
-      lastMessageId: messageId,
-      lastMessageTime: Date.now(),
-    });
-
-    return messageId;
-  },
-});
-
+//. The Query to get messages
 export const getMessages = query({
   args: { conversationId: v.id("conversations") },
   handler: async (ctx, args) => {
@@ -31,25 +10,69 @@ export const getMessages = query({
       .withIndex("by_conversation", (q) =>
         q.eq("conversationId", args.conversationId)
       )
-      .order("asc")
       .collect();
 
-    return await Promise.all(
+    // Fetch sender details for each message
+    const messagesWithSender = await Promise.all(
       messages.map(async (msg) => {
         const sender = await ctx.db.get(msg.senderId);
-        return { ...msg, sender };
+        return {
+          ...msg,
+          senderName: sender?.name ?? "Unknown",
+          senderImage: sender?.imageUrl,
+        };
       })
     );
+
+    return messagesWithSender;
   },
 });
+
+//  The Mutation to send messages
+export const sendMessage = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    senderId: v.id("users"),
+    content: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const messageId = await ctx.db.insert("messages", {
+      conversationId: args.conversationId,
+      senderId: args.senderId,
+      content: args.content,
+      isDeleted: false,
+    });
+
+    // Update the last message in the conversation
+    const conversation = await ctx.db.get(args.conversationId);
+    if (conversation) {
+      await ctx.db.patch(conversation._id, {
+        lastMessageId: messageId,
+        lastMessageTime: Date.now(),
+      });
+    }
+
+    return messageId;
+  },
+});
+
+// ... existing imports and functions ...
 
 export const deleteMessage = mutation({
   args: { messageId: v.id("messages") },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.messageId, { isDeleted: true, content: "" });
+    const message = await ctx.db.get(args.messageId);
+    
+    if (!message) {
+      throw new Error("Message not found");
+    }
+
+    // Soft delete: just mark as deleted
+    await ctx.db.patch(args.messageId, { isDeleted: true });
   },
 });
 
+// The Mutation to toggle reactions
 export const toggleReaction = mutation({
   args: {
     messageId: v.id("messages"),
@@ -58,30 +81,45 @@ export const toggleReaction = mutation({
   },
   handler: async (ctx, args) => {
     const message = await ctx.db.get(args.messageId);
-    if (!message) return;
+    if (!message) throw new Error("Message not found");
 
-    const reactions = message.reactions ?? [];
-    const existing = reactions.find((r) => r.emoji === args.emoji);
+    const reactions = message.reactions || [];
+    const existingReactionIndex = reactions.findIndex(
+      (r) => r.emoji === args.emoji
+    );
 
-    let updated;
-    if (existing) {
-      const hasReacted = existing.userIds.includes(args.userId);
-      updated = reactions
-        .map((r) =>
-          r.emoji === args.emoji
-            ? {
-                ...r,
-                userIds: hasReacted
-                  ? r.userIds.filter((id) => id !== args.userId)
-                  : [...r.userIds, args.userId],
-              }
-            : r
-        )
-        .filter((r) => r.userIds.length > 0);
+    let newReactions;
+
+    if (existingReactionIndex >= 0) {
+      const reaction = reactions[existingReactionIndex];
+      const userIndex = reaction.userIds.indexOf(args.userId);
+
+      if (userIndex >= 0) {
+        // Remove user
+        const newUserIds = reaction.userIds.filter((id) => id !== args.userId);
+        if (newUserIds.length === 0) {
+          newReactions = reactions.filter((r) => r.emoji !== args.emoji);
+        } else {
+          newReactions = [...reactions];
+          newReactions[existingReactionIndex] = {
+            ...reaction,
+            userIds: newUserIds,
+          };
+        }
+      } else {
+        // Add user
+        const newUserIds = [...reaction.userIds, args.userId];
+        newReactions = [...reactions];
+        newReactions[existingReactionIndex] = { ...reaction, userIds: newUserIds };
+      }
     } else {
-      updated = [...reactions, { emoji: args.emoji, userIds: [args.userId] }];
+      // New emoji
+      newReactions = [
+        ...reactions,
+        { emoji: args.emoji, userIds: [args.userId] },
+      ];
     }
 
-    await ctx.db.patch(args.messageId, { reactions: updated });
+    await ctx.db.patch(args.messageId, { reactions: newReactions });
   },
 });
