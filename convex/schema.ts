@@ -27,7 +27,9 @@ export default defineSchema({
     reactions: v.optional(
       v.array(v.object({ emoji: v.string(), userIds: v.array(v.id("users")) }))
     ),
-  }).index("by_conversation", ["conversationId"]),
+  })
+    .index("by_conversation", ["conversationId"])
+    .index("by_conversation_creationTime", ["conversationId", "_creationTime"]),
 
   typingIndicators: defineTable({
     conversationId: v.id("conversations"),
