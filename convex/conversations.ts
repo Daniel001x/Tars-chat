@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
 const ONLINE_THRESHOLD = 60 * 1000;
@@ -44,12 +44,10 @@ export const getUserConversations = query({
 
     const enriched = await Promise.all(
       userConvos.map(async (convo) => {
-        // For 1-on-1, we want the "other" user. For Groups, we want "all" users to count them.
         const otherParticipantIds = convo.participantIds.filter(
           (id) => id !== args.userId
         );
         
-        // Fetch all participants for group, or just the other for 1-on-1
         const usersToFetch = convo.isGroup ? convo.participantIds : otherParticipantIds;
 
         const [usersRaw, lastMessage, receipt] = await Promise.all([
@@ -63,22 +61,20 @@ export const getUserConversations = query({
             .unique(),
         ]);
 
-        // Calculate Unread Count
         let unreadCount = 0;
         const lastReadTime = receipt?.lastReadTime ?? 0;
 
         if (convo.lastMessageTime && convo.lastMessageTime > lastReadTime) {
-           const unreadMessages = await ctx.db
+          const unreadMessages = await ctx.db
             .query("messages")
-            .withIndex("by_conversation_creationTime", (q) =>
-              q.eq("conversationId", convo._id).gt("_creationTime", lastReadTime)
+            .withIndex("by_conversation", (q) =>
+              q.eq("conversationId", convo._id)
             )
+            .filter((q) => q.gt(q.field("_creationTime"), lastReadTime))
             .collect();
-            
-            unreadCount = unreadMessages.filter(m => m.senderId !== args.userId).length;
+          unreadCount = unreadMessages.filter((m) => m.senderId !== args.userId).length;
         }
 
-        // Map users to include online status
         const otherUsers = usersRaw
           .filter((u) => u !== null)
           .map((u) => ({
@@ -98,6 +94,38 @@ export const getUserConversations = query({
     return enriched.sort(
       (a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0)
     );
+  },
+});
+
+export const getConversationInfo = query({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    const conversation = await ctx.db.get(args.conversationId);
+    if (!conversation) return null;
+
+    const isGroup = conversation.isGroup;
+    const groupName = conversation.groupName ?? "Group";
+
+    const participants = await Promise.all(
+      conversation.participantIds.map(async (id) => {
+        const user = await ctx.db.get(id);
+        if (!user) return null;
+        return {
+          _id: user._id,
+          name: user.name,
+          imageUrl: user.imageUrl,
+          isOnline: user.isOnline,
+        };
+      })
+    );
+
+    const validParticipants = participants.filter((p) => p !== null);
+
+    return {
+      isGroup,
+      groupName,
+      participants: validParticipants,
+    };
   },
 });
 
