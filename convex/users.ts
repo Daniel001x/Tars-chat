@@ -32,7 +32,7 @@ export const upsertUser = mutation({
   },
 });
 
-// NEW: Simple heartbeat to keep user online
+// Simple heartbeat to keep user online
 export const heartbeat = mutation({
   args: { clerkId: v.string() },
   handler: async (ctx, args) => {
@@ -87,5 +87,18 @@ export const getUserByClerkId = query({
       .query("users")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
       .first();
+  },
+});
+
+// ADDED: Required for the Create Group Modal to list all available users
+export const getAllUsersIncludingSelf = query({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    const ONE_MINUTE = 60 * 1000;
+    return users.map((u) => ({
+      ...u,
+      isOnline: Date.now() - u.lastSeen < ONE_MINUTE,
+    }));
   },
 });
