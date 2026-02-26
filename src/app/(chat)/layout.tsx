@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import CreateGroupModal from "@/components/CreateGroupModal";
 
 const fallbackAvatar =
   "https://ui-avatars.com/api/?name=User&background=random";
@@ -21,33 +22,26 @@ export default function ChatLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [search, setSearch] = useState("");
-
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const isInConversation = pathname !== "/chat";
-
   const currentUser = useQuery(
     api.users.getUserByClerkId,
     user ? { clerkId: user.id } : "skip"
   );
-
   const allUsers = useQuery(
     api.users.getAllUsers,
     user ? { currentClerkId: user.id } : "skip"
   );
-
   const conversations = useQuery(
     api.conversations.getUserConversations,
     currentUser ? { userId: currentUser._id } : "skip"
   );
-
   const getOrCreate = useMutation(api.conversations.getOrCreateConversation);
   const upsertUser = useMutation(api.users.upsertUser);
   const heartbeat = useMutation(api.users.heartbeat);
   const setOnlineStatus = useMutation(api.users.setOnlineStatus);
-
-  // Create / update user
   useEffect(() => {
     if (!user) return;
-
     upsertUser({
       clerkId: user.id,
       name: user.fullName ?? user.username ?? "Anonymous",
@@ -55,46 +49,34 @@ export default function ChatLayout({
       imageUrl: user.imageUrl ?? fallbackAvatar,
     });
   }, [user, upsertUser]);
-
-  // Heartbeat
   useEffect(() => {
     if (!user) return;
-
     const sendHeartbeat = () => {
       heartbeat({ clerkId: user.id });
     };
-
     sendHeartbeat();
     const interval = setInterval(sendHeartbeat, 30000);
-
     const handleUnload = () => {
       setOnlineStatus({ clerkId: user.id, isOnline: false });
     };
-
     window.addEventListener("beforeunload", handleUnload);
-
     return () => {
       clearInterval(interval);
       window.removeEventListener("beforeunload", handleUnload);
     };
   }, [user, heartbeat, setOnlineStatus]);
-
   const filteredUsers = allUsers?.filter((u) =>
     u.name.toLowerCase().includes(search.toLowerCase())
   );
-
   const handleUserClick = async (otherUserId: Id<"users">) => {
     if (!currentUser) return;
-
     const convId = await getOrCreate({
       currentUserId: currentUser._id,
       otherUserId,
     });
-
     setSearch("");
     router.push(`/chat/${convId}`);
   };
-
   return (
     <div className="h-screen w-full bg-gray-100 flex overflow-hidden">
       {/* SIDEBAR */}
@@ -108,7 +90,16 @@ export default function ChatLayout({
         {/* Header */}
         <div className="bg-blue-600 p-4 flex items-center justify-between">
           <h1 className="text-lg font-bold text-white">Tars Chat</h1>
-          <UserButton afterSignOutUrl="/sign-in" />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsGroupModalOpen(true)}
+              className="text-white hover:bg-blue-700 rounded-full p-1"
+              title="Create Group"
+            >
+              +
+            </button>
+            <UserButton afterSignOutUrl="/sign-in" />
+          </div>
         </div>
 
         {/* Current User */}
@@ -125,7 +116,7 @@ export default function ChatLayout({
               <p className="text-sm font-semibold">
                 {user.fullName ?? "You"}
               </p>
-              <p className="text-xs text-green-500">● Online</p>
+              <p className="text-xs text-green-500">Online</p>
             </div>
           </div>
         )}
@@ -168,55 +159,62 @@ export default function ChatLayout({
           </div>
         )}
 
-        {/* Conversations */}
+        {/* Conversations List */}
         <div className="flex-1 overflow-y-auto">
           {!search &&
             conversations?.map((convo) => {
               const other = convo.otherUsers?.[0];
-              // Calculate online status
               const isOnline = other?.isOnline ?? false;
-              // Get unread count
-              const unreadCount = convo.unreadCount ?? 0;
-
+              const unreadCount = convo.unreadCount ?? 5;
+              const isGroup = convo.isGroup;
+              const displayName = isGroup
+                ? (convo.groupName || "Group")
+                : (other?.name || "User");
+              const displayImage = isGroup
+                ? `https://ui-avatars.com/api/?name=${encodeURIComponent(convo.groupName ?? "Group")}&background=random`
+                : (other?.imageUrl ?? fallbackAvatar);
+              const subText = isGroup
+                ? `${convo.participantIds.length} members`
+                : (convo.lastMessage?.content ?? "Start a conversation");
               return (
                 <Link
                   key={convo._id}
                   href={`/chat/${convo._id}`}
                   className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b relative"
                 >
-                  {/* Avatar with Status Dot */}
                   <div className="relative shrink-0">
                     <Image
-                      src={other?.imageUrl ?? fallbackAvatar}
-                      alt={other?.name ?? "User"}
+                      src={displayImage}
+                      alt={displayName || "Chat"}
                       width={45}
                       height={45}
                       className="rounded-full"
                     />
-                    {/* Online/Offline Dot */}
-                    <span
-                      className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
-                        isOnline ? "bg-green-500" : "bg-gray-300"
-                      }`}
-                    />
+                    {/* Online dot - only for 1-on-1 */}
+                    {!isGroup && (
+                      <span
+                        className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${
+                          isOnline ? "bg-green-500" : "bg-gray-300"
+                        }`}
+                      />
+                    )}
                   </div>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
                       <p className="text-sm font-semibold truncate">
-                        {other?.name ?? "User"}
+                        {displayName}
                       </p>
-                      {/* Unread Badge */}
-                      {unreadCount > 0 && (
+                      {unreadCount > 5 && (
                         <span className="bg-blue-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
                           {unreadCount}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 truncate">
-                      {convo.lastMessage?.content ??
-                        "Start a conversation"}
-                    </p>
+                    <div className="flex items-center gap-1">
+                       <p className="text-xs text-gray-400 truncate">
+                        {subText}
+                       </p>
+                    </div>
                   </div>
                 </Link>
               );
@@ -234,6 +232,15 @@ export default function ChatLayout({
       >
         {children}
       </div>
+
+      {/* Create Group Modal */}
+      {currentUser && (
+        <CreateGroupModal
+          isOpen={isGroupModalOpen}
+          onClose={() => setIsGroupModalOpen(false)}
+          currentUserId={currentUser._id}
+        />
+      )}
     </div>
   );
 }
