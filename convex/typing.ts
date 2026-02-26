@@ -26,8 +26,11 @@ export const setTyping = mutation({
           updatedAt: Date.now(),
         });
       }
-    } else if (existing) {
-      await ctx.db.delete(existing._id);
+    } else {
+      // User stopped typing (sent message or timed out) -> Delete the indicator
+      if (existing) {
+        await ctx.db.delete(existing._id);
+      }
     }
   },
 });
@@ -35,7 +38,10 @@ export const setTyping = mutation({
 export const getTypingUsers = query({
   args: { conversationId: v.id("conversations"), currentUserId: v.id("users") },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const TWO_SECONDS = 2000;
+
+    // 1. Get all indicators for this conversation
     const indicators = await ctx.db
       .query("typingIndicators")
       .withIndex("by_conversation", (q) =>
@@ -43,17 +49,21 @@ export const getTypingUsers = query({
       )
       .collect();
 
-    const active = indicators.filter(
-      (i) =>
-        i.userId !== args.currentUserId &&
-        Date.now() - i.updatedAt < TWO_SECONDS
+    // 2. Filter for active users (updated < 2s ago) AND exclude current user
+    const activeTypingUsers = await Promise.all(
+      indicators
+        .filter((i) => {
+          const isRecent = now - i.updatedAt < TWO_SECONDS;
+          const isNotMe = i.userId !== args.currentUserId;
+          return isRecent && isNotMe;
+        })
+        .map(async (i) => {
+          const user = await ctx.db.get(i.userId);
+          return user ? { name: user.name } : null;
+        })
     );
 
-    return await Promise.all(
-      active.map(async (i) => {
-        const user = await ctx.db.get(i.userId);
-        return user;
-      })
-    );
+    // 3. Filter out nulls (deleted users)
+    return activeTypingUsers.filter((u) => u !== null);
   },
 });
