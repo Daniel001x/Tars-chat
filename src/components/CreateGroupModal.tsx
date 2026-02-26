@@ -59,7 +59,7 @@ export default function CreateGroupModal({ isOpen, onClose, currentUserId }: Cre
         <div className="mb-4">
           <p className="text-sm font-medium text-gray-700 mb-2">Select Members:</p>
           <div className="max-h-48 overflow-y-auto space-y-2 border rounded-lg p-2">
-            {allUsers?.map((u) => (
+            {allUsers?.filter((u) => u._id !== currentUserId).map((u) => (
               <div
                 key={u._id}
                 onClick={() => toggleMember(u._id)}
