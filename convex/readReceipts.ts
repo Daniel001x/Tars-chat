@@ -1,7 +1,6 @@
-import { mutation, query } from "./_generated/server";
+import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 
-// Mark conversation as read
 export const markAsRead = mutation({
   args: {
     conversationId: v.id("conversations"),
@@ -10,20 +9,20 @@ export const markAsRead = mutation({
   handler: async (ctx, args) => {
     const existing = await ctx.db
       .query("readReceipts")
-      .withIndex("by_user_conversation", (q) =>
-        q.eq("userId", args.userId).eq("conversationId", args.conversationId)
+      .withIndex("by_conversation_user", (q) =>
+        q.eq("conversationId", args.conversationId).eq("userId", args.userId)
       )
-      .first();
+      .unique();
+
+    const now = Date.now();
 
     if (existing) {
-      await ctx.db.patch(existing._id, {
-        lastReadAt: Date.now(),
-      });
+      await ctx.db.patch(existing._id, { lastReadTime: now });
     } else {
       await ctx.db.insert("readReceipts", {
         conversationId: args.conversationId,
         userId: args.userId,
-        lastReadAt: Date.now(),
+        lastReadTime: now,
       });
     }
   },
