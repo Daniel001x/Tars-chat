@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+const ONLINE_THRESHOLD = 60 * 1000;
+
 export const getOrCreateConversation = mutation({
   args: {
     currentUserId: v.id("users"),
@@ -40,27 +42,52 @@ export const getUserConversations = query({
       c.participantIds.includes(args.userId)
     );
 
-    const ONE_MINUTE = 60 * 1000;
-
     const enriched = await Promise.all(
       userConvos.map(async (convo) => {
         const otherParticipantIds = convo.participantIds.filter(
           (id) => id !== args.userId
         );
 
-        const [otherUsers, lastMessage] = await Promise.all([
-          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
-          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
-        ]);
+        const [otherUsersRaw, lastMessage, receipt, messages] =
+          await Promise.all([
+            Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+            convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+            ctx.db
+              .query("readReceipts")
+              .withIndex("by_user_conversation", (q) =>
+                q.eq("userId", args.userId).eq("conversationId", convo._id)
+              )
+              .first(),
+            ctx.db
+              .query("messages")
+              .withIndex("by_conversation", (q) =>
+                q.eq("conversationId", convo._id)
+              )
+              .collect(),
+          ]);
 
-        const otherUsersWithStatus = otherUsers
+        const lastReadAt = receipt?.lastReadAt ?? 0;
+
+        const unreadCount = messages.filter(
+          (m) =>
+            m.senderId !== args.userId &&
+            m._creationTime > lastReadAt
+        ).length;
+
+        const otherUsers = otherUsersRaw
           .filter((u) => u !== null)
           .map((u) => ({
             ...u!,
-            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONE_MINUTE,
+            isOnline:
+              Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
           }));
 
-        return { ...convo, otherUsers: otherUsersWithStatus, lastMessage };
+        return {
+          ...convo,
+          otherUsers,
+          lastMessage,
+          unreadCount,
+        };
       })
     );
 
@@ -80,8 +107,6 @@ export const getConversationsByClerkId = query({
 
     if (!user) return [];
 
-    const ONE_MINUTE = 60 * 1000;
-
     const allConversations = await ctx.db
       .query("conversations")
       .collect();
@@ -96,19 +121,46 @@ export const getConversationsByClerkId = query({
           (id) => id !== user._id
         );
 
-        const [otherUsers, lastMessage] = await Promise.all([
-          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
-          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
-        ]);
+        const [otherUsersRaw, lastMessage, receipt, messages] =
+          await Promise.all([
+            Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+            convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+            ctx.db
+              .query("readReceipts")
+              .withIndex("by_user_conversation", (q) =>
+                q.eq("userId", user._id).eq("conversationId", convo._id)
+              )
+              .first(),
+            ctx.db
+              .query("messages")
+              .withIndex("by_conversation", (q) =>
+                q.eq("conversationId", convo._id)
+              )
+              .collect(),
+          ]);
 
-        const otherUsersWithStatus = otherUsers
+        const lastReadAt = receipt?.lastReadAt ?? 0;
+
+        const unreadCount = messages.filter(
+          (m) =>
+            m.senderId !== user._id &&
+            m._creationTime > lastReadAt
+        ).length;
+
+        const otherUsers = otherUsersRaw
           .filter((u) => u !== null)
           .map((u) => ({
             ...u!,
-            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONE_MINUTE,
+            isOnline:
+              Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
           }));
 
-        return { ...convo, otherUsers: otherUsersWithStatus, lastMessage };
+        return {
+          ...convo,
+          otherUsers,
+          lastMessage,
+          unreadCount,
+        };
       })
     );
 
