@@ -187,18 +187,21 @@ export default function ChatLayout({
               const other = convo.otherUsers?.[0];
 
               return (
-                <Link
-                  key={convo._id}
-                  href={`/chat/${convo._id}`}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b"
-                >
-                  <Image
-                    src={other?.imageUrl ?? fallbackAvatar}
-                    alt={other?.name ?? "User"}
-                    width={45}
-                    height={45}
-                    className="rounded-full"
-                  />
+               <Link
+  key={convo._id}
+  href={`/chat/${convo._id}`}
+  className="flex items-center gap-3 px-4 py-3 hover:bg-blue-50 border-b"
+>
+  <div className="relative shrink-0">
+    <Image
+      src={other?.imageUrl ?? fallbackAvatar}
+      alt={other?.name ?? "User"}
+      width={45}
+      height={45}
+      className="rounded-full"
+    />
+    <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${other?.isOnline ? "bg-green-500" : "bg-gray-300"}`} />
+  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">
                       {other?.name ?? "User"}
