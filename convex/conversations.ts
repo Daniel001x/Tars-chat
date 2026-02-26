@@ -48,38 +48,41 @@ export const getUserConversations = query({
           (id) => id !== args.userId
         );
 
-        const [otherUsersRaw, lastMessage, receipt, messages] =
-          await Promise.all([
-            Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
-            convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
-            ctx.db
-              .query("readReceipts")
-              .withIndex("by_user_conversation", (q) =>
-                q.eq("userId", args.userId).eq("conversationId", convo._id)
-              )
-              .first(),
-            ctx.db
-              .query("messages")
-              .withIndex("by_conversation", (q) =>
-                q.eq("conversationId", convo._id)
-              )
-              .collect(),
-          ]);
+        // Run parallel queries for speed
+        const [otherUsersRaw, lastMessage, receipt] = await Promise.all([
+          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+          ctx.db
+            .query("readReceipts")
+            .withIndex("by_conversation_user", (q) =>
+              q.eq("conversationId", convo._id).eq("userId", args.userId)
+            )
+            .unique(),
+        ]);
 
-        const lastReadAt = receipt?.lastReadAt ?? 0;
+        // Calculate Unread Count
+        let unreadCount = 0;
+        const lastReadTime = receipt?.lastReadTime ?? 0;
 
-        const unreadCount = messages.filter(
-          (m) =>
-            m.senderId !== args.userId &&
-            m._creationTime > lastReadAt
-        ).length;
+        // Optimization: Only query messages if the last message is newer than lastReadTime
+        if (convo.lastMessageTime && convo.lastMessageTime > lastReadTime) {
+           const unreadMessages = await ctx.db
+            .query("messages")
+            // Use the new index for speed
+            .withIndex("by_conversation_creationTime", (q) =>
+              q.eq("conversationId", convo._id).gt("_creationTime", lastReadTime)
+            )
+            .collect();
+            
+            // Filter out own messages
+            unreadCount = unreadMessages.filter(m => m.senderId !== args.userId).length;
+        }
 
         const otherUsers = otherUsersRaw
           .filter((u) => u !== null)
           .map((u) => ({
             ...u!,
-            isOnline:
-              Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
+            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
           }));
 
         return {
@@ -97,6 +100,7 @@ export const getUserConversations = query({
   },
 });
 
+// Updated helper for Clerk ID lookup
 export const getConversationsByClerkId = query({
   args: { clerkId: v.string() },
   handler: async (ctx, args) => {
@@ -121,38 +125,36 @@ export const getConversationsByClerkId = query({
           (id) => id !== user._id
         );
 
-        const [otherUsersRaw, lastMessage, receipt, messages] =
-          await Promise.all([
-            Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
-            convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
-            ctx.db
-              .query("readReceipts")
-              .withIndex("by_user_conversation", (q) =>
-                q.eq("userId", user._id).eq("conversationId", convo._id)
-              )
-              .first(),
-            ctx.db
-              .query("messages")
-              .withIndex("by_conversation", (q) =>
-                q.eq("conversationId", convo._id)
-              )
-              .collect(),
-          ]);
+        const [otherUsersRaw, lastMessage, receipt] = await Promise.all([
+          Promise.all(otherParticipantIds.map((id) => ctx.db.get(id))),
+          convo.lastMessageId ? ctx.db.get(convo.lastMessageId) : null,
+          ctx.db
+            .query("readReceipts")
+            .withIndex("by_conversation_user", (q) =>
+              q.eq("conversationId", convo._id).eq("userId", user._id)
+            )
+            .unique(),
+        ]);
 
-        const lastReadAt = receipt?.lastReadAt ?? 0;
+        // Calculate Unread Count
+        let unreadCount = 0;
+        const lastReadTime = receipt?.lastReadTime ?? 0;
 
-        const unreadCount = messages.filter(
-          (m) =>
-            m.senderId !== user._id &&
-            m._creationTime > lastReadAt
-        ).length;
+        if (convo.lastMessageTime && convo.lastMessageTime > lastReadTime) {
+           const unreadMessages = await ctx.db
+            .query("messages")
+            .withIndex("by_conversation_creationTime", (q) =>
+              q.eq("conversationId", convo._id).gt("_creationTime", lastReadTime)
+            )
+            .collect();
+            unreadCount = unreadMessages.filter(m => m.senderId !== user._id).length;
+        }
 
         const otherUsers = otherUsersRaw
           .filter((u) => u !== null)
           .map((u) => ({
             ...u!,
-            isOnline:
-              Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
+            isOnline: Date.now() - (u!.lastSeen ?? 0) < ONLINE_THRESHOLD,
           }));
 
         return {
