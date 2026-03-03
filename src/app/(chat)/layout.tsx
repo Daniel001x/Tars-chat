@@ -23,23 +23,30 @@ export default function ChatLayout({
   const pathname = usePathname();
   const [search, setSearch] = useState("");
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+
   const isInConversation = pathname !== "/chat";
+
   const currentUser = useQuery(
     api.users.getUserByClerkId,
     user ? { clerkId: user.id } : "skip"
   );
+
   const allUsers = useQuery(
     api.users.getAllUsers,
     user ? { currentClerkId: user.id } : "skip"
   );
+
   const conversations = useQuery(
     api.conversations.getUserConversations,
     currentUser ? { userId: currentUser._id } : "skip"
   );
+
   const getOrCreate = useMutation(api.conversations.getOrCreateConversation);
   const upsertUser = useMutation(api.users.upsertUser);
   const heartbeat = useMutation(api.users.heartbeat);
   const setOnlineStatus = useMutation(api.users.setOnlineStatus);
+
+  // User Sync
   useEffect(() => {
     if (!user) return;
     upsertUser({
@@ -49,34 +56,46 @@ export default function ChatLayout({
       imageUrl: user.imageUrl ?? fallbackAvatar,
     });
   }, [user, upsertUser]);
+
+  // Heartbeat
   useEffect(() => {
     if (!user) return;
+
     const sendHeartbeat = () => {
       heartbeat({ clerkId: user.id });
     };
+
     sendHeartbeat();
     const interval = setInterval(sendHeartbeat, 30000);
+
     const handleUnload = () => {
       setOnlineStatus({ clerkId: user.id, isOnline: false });
     };
+
     window.addEventListener("beforeunload", handleUnload);
+
     return () => {
       clearInterval(interval);
       window.removeEventListener("beforeunload", handleUnload);
     };
   }, [user, heartbeat, setOnlineStatus]);
+
   const filteredUsers = allUsers?.filter((u) =>
     u.name.toLowerCase().includes(search.toLowerCase())
   );
+
   const handleUserClick = async (otherUserId: Id<"users">) => {
     if (!currentUser) return;
+
     const convId = await getOrCreate({
       currentUserId: currentUser._id,
       otherUserId,
     });
+
     setSearch("");
     router.push(`/chat/${convId}`);
   };
+
   return (
     <div className="h-screen w-full bg-gray-100 flex overflow-hidden">
       {/* SIDEBAR */}
@@ -165,17 +184,24 @@ export default function ChatLayout({
             conversations?.map((convo) => {
               const other = convo.otherUsers?.[0];
               const isOnline = other?.isOnline ?? false;
-              const unreadCount = convo.unreadCount ?? 5;
+              // Get unread count from the query result
+              const unreadCount = convo.unreadCount ?? 0;
+
               const isGroup = convo.isGroup;
               const displayName = isGroup
-                ? (convo.groupName || "Group")
-                : (other?.name || "User");
+                ? convo.groupName ?? "Group"
+                : other?.name ?? "User";
+
               const displayImage = isGroup
-                ? `https://ui-avatars.com/api/?name=${encodeURIComponent(convo.groupName ?? "Group")}&background=random`
-                : (other?.imageUrl ?? fallbackAvatar);
+                ? `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                    convo.groupName ?? "Group"
+                  )}&background=random`
+                : other?.imageUrl ?? fallbackAvatar;
+
               const subText = isGroup
                 ? `${convo.participantIds.length} members`
-                : (convo.lastMessage?.content ?? "Start a conversation");
+                : convo.lastMessage?.content ?? "Start a conversation";
+
               return (
                 <Link
                   key={convo._id}
@@ -199,17 +225,20 @@ export default function ChatLayout({
                       />
                     )}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
                       <p className="text-sm font-semibold truncate">
                         {displayName}
                       </p>
-                      {unreadCount > 5 && (
+                      {/* UNREAD BADGE */}
+                      {unreadCount > 0 && (
                         <span className="bg-blue-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
                           {unreadCount}
                         </span>
                       )}
                     </div>
+                    
                     <div className="flex items-center gap-1">
                        <p className="text-xs text-gray-400 truncate">
                         {subText}
